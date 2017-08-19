@@ -16,13 +16,17 @@
 
 package org.springframework.boot.context.properties;
 
+import java.util.Map;
+
 import org.springframework.boot.context.properties.bind.BindHandler;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.bind.PropertySourcesPlaceholdersResolver;
+import org.springframework.boot.context.properties.bind.handler.FallbackBindHandler;
 import org.springframework.boot.context.properties.bind.handler.IgnoreErrorsBindHandler;
 import org.springframework.boot.context.properties.bind.handler.NoUnboundElementsBindHandler;
 import org.springframework.boot.context.properties.bind.validation.ValidationBindHandler;
+import org.springframework.boot.context.properties.source.ConfigurationPropertyName;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySource;
 import org.springframework.boot.context.properties.source.ConfigurationPropertySources;
 import org.springframework.boot.context.properties.source.UnboundElementsSourceFilter;
@@ -94,16 +98,25 @@ public class ConfigurationPropertiesBinder {
 		Binder binder = new Binder(this.configurationSources,
 				new PropertySourcesPlaceholdersResolver(this.propertySources),
 				this.conversionService);
-		Validator validator = determineValidator(target);
-		BindHandler handler = getBindHandler(annotation, validator);
-		Bindable<?> bindable = Bindable.ofInstance(target);
 		try {
+		Map<ConfigurationPropertyName, ConfigurationPropertyName> fallbacks = getConfigurationPropertyFallbacks(
+				target, annotation.prefix());
+		Validator validator = determineValidator(target);
+		BindHandler handler = getBindHandler(annotation, validator, fallbacks);
+		Bindable<?> bindable = Bindable.ofInstance(target);
 			binder.bind(annotation.prefix(), bindable, handler);
 		}
 		catch (Exception ex) {
 			throw new ConfigurationPropertiesBindingException(target.getClass(),
 					getAnnotationDetails(annotation), ex);
 		}
+	}
+
+	private Map<ConfigurationPropertyName, ConfigurationPropertyName> getConfigurationPropertyFallbacks(
+			Object bean, String prefix) {
+		ConfigurationPropertyValueReader annotationReader = new ConfigurationPropertyValueReader(
+				bean, prefix);
+		return annotationReader.getPropertyFallbacks();
 	}
 
 	/**
@@ -128,7 +141,8 @@ public class ConfigurationPropertiesBinder {
 	}
 
 	private BindHandler getBindHandler(ConfigurationProperties annotation,
-			Validator validator) {
+			Validator validator,
+			Map<ConfigurationPropertyName, ConfigurationPropertyName> fallbacks) {
 		BindHandler handler = BindHandler.DEFAULT;
 		if (annotation.ignoreInvalidFields()) {
 			handler = new IgnoreErrorsBindHandler(handler);
@@ -139,6 +153,9 @@ public class ConfigurationPropertiesBinder {
 		}
 		if (validator != null) {
 			handler = new ValidationBindHandler(handler, validator);
+		}
+		if (!fallbacks.isEmpty()) {
+			handler = new FallbackBindHandler(fallbacks);
 		}
 		return handler;
 	}
